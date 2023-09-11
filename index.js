@@ -67,6 +67,7 @@ function Hook(modules, options, hookFn) {
       for (const moduleName of modules) {
         if (moduleName === name) {
           if (baseDir) {
+            debugger
             if (internals) {
               name = name + path.sep + path.relative(baseDir, fileURLToPath(filename))
             } else {
