@@ -14,11 +14,12 @@ const NODE_MINOR = Number(NODE_VERSION[1])
 
 let entrypoint
 
-if (NODE_MAJOR >= 20) {
+/*if (NODE_MAJOR >= 20) {
   getExports = require('./lib/get-exports.js')
 } else {
   getExports = (url) => import(url).then(Object.keys)
-}
+}*/
+getExports = (url) => import(url).then(Object.keys)
 
 function hasIitm (url) {
   try {
@@ -29,7 +30,7 @@ function hasIitm (url) {
 }
 
 function isIitm (url, meta) {
-  return url === meta.url || url === meta.url.replace('hook.mjs', 'hook.js')
+  return url === meta.url || url === meta.url.replace('hook.mjs', 'hook.js') || url.includes('register.mjs')
 }
 
 function deleteIitm (url) {
@@ -83,13 +84,27 @@ function addIitm (url) {
   return needsToAddFileProtocol(urlObj) ? 'file:' + urlObj.href : urlObj.href
 }
 
+const xportNames = new Map()
+
 function createHook (meta) {
+  let port
+  let xports
+
+  function initialize(data) {
+    console.log('hello')
+    port = data.port
+    port.on('message', ({ xports, url }) => {
+      xportNames.set(url, xports)
+      console.log('got data', xports, url)
+    })
+  }
   async function resolve (specifier, context, parentResolve) {
     const { parentURL = '' } = context
     const newSpecifier = deleteIitm(specifier)
     if (isWin && parentURL.indexOf('file:node') === 0) {
       context.parentURL = ''
     }
+
     const url = await parentResolve(newSpecifier, context, parentResolve)
     if (parentURL === '' && !EXTENSION_RE.test(url.url)) {
       entrypoint = url.url
@@ -105,6 +120,8 @@ function createHook (meta) {
     }
 
 
+    // fire and forget because i cannot figure out what to await
+    port.postMessage({ url: url.url })
     specifiers.set(url.url, specifier)
 
     return {
@@ -116,27 +133,28 @@ function createHook (meta) {
 
   const iitmURL = new URL('lib/register.js', meta.url).toString()
   async function getSource (url, context, parentGetSource) {
+    debugger
     if (hasIitm(url)) {
       const realUrl = deleteIitm(url)
+      console.log('waiting for exports for', url)
+      const n = xportNames.get(url)
+      console.log('do we have exports?', n)
       const exportNames = await getExports(realUrl, context, parentGetSource)
+      console.log('you can see for some reason this awaited import in the worker thread returns first, i guess because they are different event loops')
+      console.log('names', exportNames)
       return {
         source: `
 import { register } from '${iitmURL}'
 import * as namespace from ${JSON.stringify(url)}
 const set = {}
-${exportNames.map((n) => {
-  if (n.startsWith('export')) {
-    return `${n}`
-  } else {
-return `
+${exportNames.map((n) => `
 let $${n} = namespace.${n}
 export { $${n} as ${n} }
 set.${n} = (v) => {
   $${n} = v
   return true
 }
-`
-}}).join('\n')}
+`).join('\n')}
 register(${JSON.stringify(realUrl)}, namespace, set, ${JSON.stringify(specifiers.get(realUrl))})
 `
       }
@@ -160,7 +178,7 @@ register(${JSON.stringify(realUrl)}, namespace, set, ${JSON.stringify(specifiers
   }
 
   if (NODE_MAJOR >= 17 || (NODE_MAJOR === 16 && NODE_MINOR >= 12)) {
-    return { load, resolve }
+    return { load, resolve, initialize }
   } else {
     return {
       load,

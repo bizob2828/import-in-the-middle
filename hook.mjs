@@ -4,6 +4,6 @@
 
 import { createHook } from './hook.js'
 
-const { load, resolve, getFormat, getSource } = createHook(import.meta)
+const { load, resolve, getFormat, getSource, initialize } = createHook(import.meta)
 
-export { load, resolve, getFormat, getSource }
+export { load, resolve, getFormat, getSource, initialize }
